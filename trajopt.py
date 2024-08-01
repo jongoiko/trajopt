@@ -68,8 +68,8 @@ class OCP:
         n_grid,
         solver_kwargs=None,
     ):
-        self._dynamics = jax.jit(dynamics)
-        self._running_cost = jax.jit(running_cost)
+        self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0)))
+        self._running_cost = jax.jit(jax.vmap(running_cost, in_axes=(0, 0)))
         self._t_0 = t_0
         self._t_f = t_f
         self._x_0 = x_0

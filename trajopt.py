@@ -1,37 +1,12 @@
-from functools import partial
 import cyipopt
 import numpy as np
 import jax
 import jax.numpy as jnp
+from collocation.util import _pack_x_u, _unpack_x_u
+from collocation import trapezoidal
 
 
-@jax.jit
-def _pack_x_u(x, u):
-    return jnp.concatenate([x.reshape(-1), u.reshape(-1)])
-
-
-@partial(jax.jit, static_argnums=(1, 2))
-def _unpack_x_u(x_u, x_shape, u_shape):
-    num_x_vars = np.prod(np.asarray(x_shape))
-    return x_u[:num_x_vars].reshape(*x_shape), x_u[num_x_vars:].reshape(*u_shape)
-
-
-@partial(jax.jit, static_argnums=(1, 2, 3, 4))
-def _collocation_constraints(x_u, time_step, dynamics, x_shape, u_shape):
-    x, u = _unpack_x_u(x_u, x_shape, u_shape)
-    x_dot = dynamics(x, u)
-    constraints = x[1:] - x[:-1] - (time_step / 2) * (x_dot[1:] + x_dot[:-1])
-    return constraints.reshape(-1)
-
-
-@partial(jax.jit, static_argnums=(1, 2, 3, 4))
-def _objective(x_u, time_step, running_cost, x_shape, u_shape):
-    x, u = _unpack_x_u(x_u, x_shape, u_shape)
-    cost = running_cost(x, u)
-    return (time_step / 2) * (cost[:-1] + cost[1:]).sum()
-
-
-class Trajectory:
+class Guess:
     def __init__(self, t, x, u):
         self._t = t
         self._x = x
@@ -48,6 +23,10 @@ class Trajectory:
 
 
 class OCP:
+    METHOD_ALIASES = {
+        "trapezoidal": (trapezoidal, trapezoidal.TrapezoidalTrajectory),
+    }
+
     def __init__(
         self,
         dynamics,
@@ -62,8 +41,15 @@ class OCP:
         u_upper,
         initial_guess,
         n_grid,
+        method,
         solver_kwargs=None,
     ):
+        if method not in self.METHOD_ALIASES:
+            raise ValueError(
+                f"Choose one collocation method from {list(self.METHOD_ALIASES.keys())}"
+            )
+        self._method = self.METHOD_ALIASES[method][0]
+        self._trajectory_subclass = self.METHOD_ALIASES[method][1]
         self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0)))
         self._running_cost = jax.jit(jax.vmap(running_cost, in_axes=(0, 0)))
         self._t_0 = t_0
@@ -77,10 +63,10 @@ class OCP:
         self._x_shape = (n_grid, x_0.size)
         self._u_shape = (n_grid, initial_guess._u.shape[1])
         self._time_step = (t_f - t_0) / (n_grid - 1)
-        self.constraints = lambda x_u: _collocation_constraints(
+        self.constraints = lambda x_u: self._method._collocation_constraints(
             x_u, self._time_step, self._dynamics, self._x_shape, self._u_shape
         )
-        self.objective = lambda x_u: _objective(
+        self.objective = lambda x_u: self._method._objective(
             x_u, self._time_step, self._running_cost, self._x_shape, self._u_shape
         )
         self.gradient = jax.jit(jax.grad(self.objective))
@@ -113,4 +99,4 @@ class OCP:
         x_u, _ = self._nlp.solve(self._initial_guess)
         x, u = _unpack_x_u(x_u, self._x_shape, self._u_shape)
         self._nlp.close()
-        return Trajectory(self._t, x, u)
+        return self._trajectory_subclass(self._t, x, u, self._dynamics(x, u))

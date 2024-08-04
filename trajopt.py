@@ -20,12 +20,8 @@ def _unpack_x_u(x_u, x_shape, u_shape):
 def _collocation_constraints(x_u, time_step, dynamics, x_shape, u_shape):
     x, u = _unpack_x_u(x_u, x_shape, u_shape)
     x_dot = dynamics(x, u)
-    constraints = (
-        x
-        - jnp.roll(x, 1, axis=0)
-        - (time_step / 2) * (x_dot + jnp.roll(x_dot, 1, axis=0))
-    )
-    return constraints[1:].reshape(-1)
+    constraints = x[1:] - x[:-1] - (time_step / 2) * (x_dot[1:] + x_dot[:-1])
+    return constraints.reshape(-1)
 
 
 @partial(jax.jit, static_argnums=(1, 2, 3, 4))

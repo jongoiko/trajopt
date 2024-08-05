@@ -14,16 +14,17 @@ def _collocation_constraints(x_u, time_step, dynamics, x_shape, u_shape):
     return constraints.reshape(-1)
 
 
-@partial(jax.jit, static_argnums=(1, 2, 3, 4))
-def _objective(x_u, time_step, running_cost, x_shape, u_shape):
+@partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
+def _objective(x_u, time_step, running_cost, _, x_shape, u_shape):
     x, u = _unpack_x_u(x_u, x_shape, u_shape)
     cost = running_cost(x, u)
     return (time_step / 2) * (cost[:-1] + cost[1:]).sum()
 
 
 class TrapezoidalTrajectory(Trajectory):
-    def __init__(self, t, x, u, x_dot):
-        super().__init__(t, x, u, x_dot)
+    def __init__(self, t, x, u, dynamics):
+        super().__init__(t, x, u, dynamics)
+        self._x_dot = dynamics(x, u)
 
     def interpolate(self, t):
         x = np.empty((t.size, self._x.shape[1]))

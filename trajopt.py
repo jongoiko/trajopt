@@ -63,22 +63,37 @@ class OCP:
         self._x_shape = (n_grid, x_0.size)
         self._u_shape = (n_grid, initial_guess._u.shape[1])
         self._time_step = (t_f - t_0) / (n_grid - 1)
-        self.constraints = lambda x_u: self._method._collocation_constraints(
-            x_u, self._time_step, self._dynamics, self._x_shape, self._u_shape
-        )
         self.objective = lambda x_u: self._method._objective(
             x_u, self._time_step, self._running_cost, self._x_shape, self._u_shape
         )
         self.gradient = jax.jit(jax.grad(self.objective))
-        self.jacobian = jax.jit(jax.jacobian(self.constraints))
+        self.constraints = lambda x_u: self._method._collocation_constraints(
+            x_u, self._time_step, self._dynamics, self._x_shape, self._u_shape
+        )
         self._n_grid = n_grid
         self._t = jnp.linspace(self._t_0, self._t_f, self._n_grid)
         self._initial_guess = _pack_x_u(*initial_guess.interpolate(self._t))
+        self._jacobian_structure = self._estimate_jacobian_structure()
+        self.jacobianstructure = jax.jit(lambda: self._jacobian_structure)
+        self.jacobian = jax.jit(
+            lambda x_u: jax.jacobian(self.constraints)(x_u)[self._jacobian_structure]
+        )
         self._nlp = self._build_nlp()
         if solver_kwargs is None:
             return
         for key, value in solver_kwargs.items():
             self._nlp.add_option(key, value)
+
+    def _estimate_jacobian_structure(self, seed=42, n_samples=100):
+        key = jax.random.key(seed)
+        key, *subkeys = jax.random.split(key, n_samples)
+        get_jacobian = jax.jit(jax.jacobian(self.constraints))
+        jac_sum = np.zeros(get_jacobian(self._initial_guess).shape)
+        for subkey in subkeys:
+            perturbation = jax.random.normal(subkey, shape=self._initial_guess.shape)
+            jacobian = get_jacobian(self._initial_guess + perturbation)
+            jac_sum += jnp.abs(jacobian)
+        return jnp.nonzero(jac_sum)
 
     def _build_nlp(self):
         n = self._initial_guess.size

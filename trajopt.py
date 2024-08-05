@@ -28,6 +28,10 @@ class Guess:
             u[:, i] = np.interp(u_t, self._t, self._u[:, i])
         return x, u
 
+    @staticmethod
+    def from_trajectory(trajectory):
+        return Guess(trajectory._t, trajectory._x, trajectory._u)
+
 
 class OCP:
     _METHOD_ALIASES = {

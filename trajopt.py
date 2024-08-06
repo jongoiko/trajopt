@@ -73,13 +73,13 @@ class OCP:
         self._running_cost = jax.jit(jax.vmap(running_cost, in_axes=(0, 0)))
         self._t_0 = t_0
         self._t_f = t_f
-        self._x_0 = x_0
-        self._x_f = x_f
+        self._x_0_lower, self._x_0_upper = x_0
+        self._x_f_lower, self._x_f_upper = x_f
         self._x_lower = x_lower
         self._x_upper = x_upper
         self._u_lower = u_lower
         self._u_upper = u_upper
-        self._x_shape = (n_grid, x_0.size)
+        self._x_shape = (n_grid, self._x_0_lower.size)
         self._u_shape = (
             n_grid if not self._u_midpoints else 2 * n_grid - 1,
             initial_guess._u.shape[1],
@@ -137,8 +137,8 @@ class OCP:
             )
             for arr in [self._u_lower, self._u_upper]
         ]
-        lb_x = lb_x.at[0].set(self._x_0).at[-1].set(self._x_f)
-        ub_x = ub_x.at[0].set(self._x_0).at[-1].set(self._x_f)
+        lb_x = lb_x.at[0].set(self._x_0_lower).at[-1].set(self._x_f_lower)
+        ub_x = ub_x.at[0].set(self._x_0_upper).at[-1].set(self._x_f_upper)
         lb, ub = _pack_x_u(lb_x, lb_u), _pack_x_u(ub_x, ub_u)
         zeros = jnp.zeros(m)
         return cyipopt.Problem(

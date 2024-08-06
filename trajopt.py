@@ -59,6 +59,7 @@ class OCP:
         n_grid,
         method,
         solver_kwargs=None,
+        jac_sparsity_estimation_samples=100,
     ):
         if method not in self._METHOD_ALIASES:
             raise ValueError(
@@ -102,7 +103,9 @@ class OCP:
         self._initial_guess = _pack_x_u(
             *initial_guess.interpolate(self._t, self._u_midpoints)
         )
-        self._jacobian_structure = self._estimate_jacobian_structure()
+        self._jacobian_structure = self._estimate_jacobian_structure(
+            jac_sparsity_estimation_samples
+        )
         self.jacobianstructure = jax.jit(lambda: self._jacobian_structure)
         self.jacobian = jax.jit(
             lambda x_u: jax.jacobian(self.constraints)(x_u)[self._jacobian_structure]
@@ -113,7 +116,7 @@ class OCP:
         for key, value in solver_kwargs.items():
             self._nlp.add_option(key, value)
 
-    def _estimate_jacobian_structure(self, seed=42, n_samples=100):
+    def _estimate_jacobian_structure(self, n_samples, seed=42):
         key = jax.random.key(seed)
         key, *subkeys = jax.random.split(key, n_samples)
         get_jacobian = jax.jit(jax.jacobian(self.constraints))

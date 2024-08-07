@@ -51,10 +51,8 @@ class OCP:
         t_f,
         x_0,
         x_f,
-        x_lower,
-        x_upper,
-        u_lower,
-        u_upper,
+        x_bounds,
+        u_bounds,
         initial_guess,
         n_grid,
         method,
@@ -76,10 +74,8 @@ class OCP:
         self._t_f = t_f
         self._x_0_lower, self._x_0_upper = x_0
         self._x_f_lower, self._x_f_upper = x_f
-        self._x_lower = x_lower
-        self._x_upper = x_upper
-        self._u_lower = u_lower
-        self._u_upper = u_upper
+        self._x_lower, self._x_upper = x_bounds
+        self._u_lower, self._u_upper = u_bounds
         self._x_shape = (n_grid, self._x_0_lower.size)
         self._u_shape = (
             n_grid if not self._u_midpoints else 2 * n_grid - 1,

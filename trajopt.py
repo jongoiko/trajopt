@@ -2,7 +2,7 @@ import cyipopt
 import numpy as np
 import jax
 import jax.numpy as jnp
-from collocation.util import _pack_x_u, _unpack_x_u
+from collocation.util import _pack, _unpack, _get_time
 from collocation import trapezoidal, hermite_simpson
 
 
@@ -68,10 +68,10 @@ class OCP:
             self._trajectory_subclass,
             self._u_midpoints,
         ) = self._METHOD_ALIASES[method]
-        self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0)))
-        self._running_cost = jax.jit(jax.vmap(running_cost, in_axes=(0, 0)))
-        self._t_0 = t_0
-        self._t_f = t_f
+        self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0, 0)))
+        self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
+        self._t_0_lower, self._t_0_upper = t_0
+        self._t_f_lower, self._t_f_upper = t_f
         self._x_0_lower, self._x_0_upper = x_0
         self._x_f_lower, self._x_f_upper = x_f
         self._x_lower, self._x_upper = x_bounds
@@ -81,10 +81,10 @@ class OCP:
             n_grid if not self._u_midpoints else 2 * n_grid - 1,
             initial_guess._u.shape[1],
         )
-        self._time_step = (t_f - t_0) / (n_grid - 1)
+        self._time_fractions = jnp.linspace(0, 1, n_grid)
         self.objective = lambda x_u: self._method._objective(
             x_u,
-            self._time_step,
+            self._time_fractions,
             self._running_cost,
             self._dynamics,
             self._x_shape,
@@ -92,12 +92,17 @@ class OCP:
         )
         self.gradient = jax.jit(jax.grad(self.objective))
         self.constraints = lambda x_u: self._method._collocation_constraints(
-            x_u, self._time_step, self._dynamics, self._x_shape, self._u_shape
+            x_u, self._time_fractions, self._dynamics, self._x_shape, self._u_shape
         )
         self._n_grid = n_grid
-        self._t = jnp.linspace(self._t_0, self._t_f, self._n_grid)
-        self._initial_guess = _pack_x_u(
-            *initial_guess.interpolate(self._t, self._u_midpoints)
+        guess_t_0, guess_t_f = initial_guess._t.min(), initial_guess._t.max()
+        self._initial_guess = _pack(
+            *initial_guess.interpolate(
+                jnp.linspace(guess_t_0, guess_t_f, n_grid),
+                self._u_midpoints,
+            ),
+            guess_t_0,
+            guess_t_f,
         )
         self._jacobian_structure = self._estimate_jacobian_structure(
             jac_sparsity_estimation_samples
@@ -138,7 +143,9 @@ class OCP:
         ]
         lb_x = lb_x.at[0].set(self._x_0_lower).at[-1].set(self._x_f_lower)
         ub_x = ub_x.at[0].set(self._x_0_upper).at[-1].set(self._x_f_upper)
-        lb, ub = _pack_x_u(lb_x, lb_u), _pack_x_u(ub_x, ub_u)
+        lb, ub = _pack(lb_x, lb_u, self._t_0_lower, self._t_f_lower), _pack(
+            ub_x, ub_u, self._t_0_upper, self._t_f_upper
+        )
         zeros = jnp.zeros(m)
         return cyipopt.Problem(
             problem_obj=self, n=n, m=m, cl=zeros, cu=zeros, lb=lb, ub=ub
@@ -146,6 +153,7 @@ class OCP:
 
     def solve(self):
         x_u, _ = self._nlp.solve(self._initial_guess)
-        x, u = _unpack_x_u(x_u, self._x_shape, self._u_shape)
+        x, u, t_0, t_f = _unpack(x_u, self._x_shape, self._u_shape)
         self._nlp.close()
-        return self._trajectory_subclass(self._t, x, u, self._dynamics)
+        t = _get_time(t_0, t_f, self._time_fractions)
+        return self._trajectory_subclass(t, x, u, self._dynamics)

@@ -1,30 +1,34 @@
 from functools import partial
-from .util import _unpack_x_u
+from .util import _unpack, _get_time
 from .trajectory import Trajectory
 from scipy.interpolate import BPoly
 import jax
 import numpy as np
 
 
-@partial(jax.jit, static_argnums=(1, 2, 3, 4))
-def _collocation_constraints(x_u, time_step, dynamics, x_shape, u_shape):
-    x, u = _unpack_x_u(x_u, x_shape, u_shape)
-    x_dot = dynamics(x, u)
-    constraints = x[1:] - x[:-1] - (time_step / 2) * (x_dot[1:] + x_dot[:-1])
+@partial(jax.jit, static_argnums=(2, 3, 4))
+def _collocation_constraints(x_u, time_fractions, dynamics, x_shape, u_shape):
+    x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
+    t = _get_time(t_0, t_f, time_fractions).reshape(-1, 1)
+    x_dot = dynamics(x, u, t)
+    h = t[1:] - t[:-1]
+    constraints = x[1:] - x[:-1] - (h / 2) * (x_dot[1:] + x_dot[:-1])
     return constraints.reshape(-1)
 
 
-@partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
-def _objective(x_u, time_step, running_cost, _, x_shape, u_shape):
-    x, u = _unpack_x_u(x_u, x_shape, u_shape)
-    cost = running_cost(x, u)
-    return (time_step / 2) * (cost[:-1] + cost[1:]).sum()
+@partial(jax.jit, static_argnums=(2, 3, 4, 5))
+def _objective(x_u, time_fractions, running_cost, _, x_shape, u_shape):
+    x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
+    t = _get_time(t_0, t_f, time_fractions).reshape(-1, 1)
+    cost = running_cost(x, u, t)
+    h = t[1:] - t[:-1]
+    return ((h / 2).reshape(-1) * (cost[:-1] + cost[1:])).sum()
 
 
 class TrapezoidalTrajectory(Trajectory):
     def __init__(self, t, x, u, dynamics):
         super().__init__(t, x, u, dynamics)
-        self._x_dot = dynamics(x, u)
+        self._x_dot = dynamics(x, u, t)
 
     def interpolate(self, t):
         x = np.empty((t.size, self._x.shape[1]))

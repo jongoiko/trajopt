@@ -42,9 +42,28 @@ def _objective(x_u, time_fractions, running_cost, dynamics, x_shape, u_shape):
     return ((h / 6).reshape(-1) * (cost[:-1] + 4 * cost_midpoints + cost[1:])).sum()
 
 
+def _interp_quadratic_midpoints(values, values_midpoints, t_val, t):
+    knot_index = jnp.argmax(t_val < t) - 1
+    p = jnp.polyfit(
+        jnp.linspace(t[knot_index], t[knot_index + 1], 3),
+        jnp.vstack(
+            [
+                values[knot_index],
+                values_midpoints[knot_index],
+                values[knot_index + 1],
+            ]
+        ),
+        deg=2,
+    )
+    return jnp.polyval(p, t_val)
+
+
 class HermiteSimpsonTrajectory(Trajectory):
     def __init__(self, t, x, u, dynamics):
         super().__init__(t, x, u, dynamics)
+        self._interp_quadratic_midpoints = jax.jit(
+            jax.vmap(_interp_quadratic_midpoints, in_axes=(None, None, 0, None))
+        )
         time_fractions = (t - self.t_0) / (self.t_f - self.t_0)
         (
             self._x,
@@ -65,21 +84,7 @@ class HermiteSimpsonTrajectory(Trajectory):
 
     def interpolate(self, t):
         x = np.empty((t.size, self._x.shape[1]))
-        u = np.empty((t.size, self._u.shape[1]))
-        for i, t_val in enumerate(t):
-            knot_index = jnp.argmax(t_val < self._t) - 1
-            p = jnp.polyfit(
-                jnp.linspace(self._t[knot_index], self._t[knot_index + 1], 3),
-                jnp.vstack(
-                    [
-                        self._u[knot_index],
-                        self._u_midpoints[knot_index],
-                        self._u[knot_index + 1],
-                    ]
-                ),
-                deg=2,
-            )
-            u[i, :] = jnp.polyval(p, t_val)
+        u = self._interp_quadratic_midpoints(self._u, self._u_midpoints, t, self._t)
         t_full = np.repeat(np.asarray(self._t), 2)[:-1]
         t_full[1::2] = self._t[:-1] + self._h.reshape(-1) / 2
         x_full = np.repeat(np.asarray(self._x), 2, axis=0)[:-1]

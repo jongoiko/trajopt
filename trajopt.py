@@ -55,6 +55,12 @@ def _objective(
     return running_cost + terminal_cost
 
 
+def _collocation_error(t, ocp, solution, variable):
+    t = jnp.array([t])
+    x, u = solution.interpolate(t)
+    return jnp.abs((ocp._dynamics(x, u, t) - solution._approx_dynamics(t))[0, variable])
+
+
 class OCP:
     _METHOD_ALIASES = {
         "trapezoidal": (trapezoidal, trapezoidal.TrapezoidalTrajectory, False),
@@ -206,3 +212,31 @@ class OCP:
         x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
         t = _get_time(t_0, t_f, self._time_fractions)
         return self._trajectory_subclass(t, x, u, self._dynamics)
+
+    def _get_discretization_errors(self, x, u, t, trajectory):
+        variable_weights = (
+            jnp.abs(
+                jnp.vstack(
+                    [
+                        self._dynamics(
+                            x, u if not self._u_midpoints else u[::2], t.reshape(-1, 1)
+                        ),
+                        x,
+                    ]
+                )
+            )
+            .max(axis=0)
+            .reshape(-1)
+        )
+        errors = []
+        for t_a, t_b in zip(t[:-1], t[1:]):
+            max_error = 0
+            for variable, weight in enumerate(variable_weights):
+                integral, _ = scipy.integrate.quad(
+                    lambda t: _collocation_error(t, self, trajectory, variable),
+                    t_a,
+                    t_b,
+                )
+                max_error = max(max_error, integral / (weight + 1))
+            errors.append(max_error)
+        return jnp.asarray(errors)

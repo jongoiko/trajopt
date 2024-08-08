@@ -96,3 +96,8 @@ class HermiteSimpsonTrajectory(Trajectory):
                 t_full, np.hstack((x_full[:, [i]], x_dot_full[:, [i]])), orders=3
             )(t)
         return x, u
+
+    def _approx_dynamics(self, t):
+        return self._interp_quadratic_midpoints(
+            self._x_dot, self._x_dot_midpoints, t, self._t
+        )

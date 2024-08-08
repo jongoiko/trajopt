@@ -41,3 +41,9 @@ class TrapezoidalTrajectory(Trajectory):
                 self._t, np.hstack((self._x[:, [i]], x_dot[:, [i]])), orders=2
             )(t)
         return x, u
+
+    def _approx_dynamics(self, t):
+        x_dot = np.empty((t.size, self._x.shape[1]))
+        for i in range(self._x.shape[1]):
+            x_dot[:, i] = np.interp(t, self._t, self._x_dot[:, i])
+        return x_dot

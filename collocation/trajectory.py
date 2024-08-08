@@ -12,3 +12,7 @@ class Trajectory(abc.ABC):
     @abc.abstractmethod
     def interpolate(self, t):
         pass
+
+    @abc.abstractmethod
+    def _approx_dynamics(self, t):
+        pass

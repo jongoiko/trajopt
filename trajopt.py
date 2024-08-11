@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import scipy.integrate
 import types
+from functools import partial
 from collocation.util import _pack, _unpack, _get_time
 from collocation import trapezoidal, hermite_simpson
 
@@ -35,6 +36,25 @@ class Guess:
         return Guess(trajectory._t, trajectory._x, trajectory._u)
 
 
+@partial(jax.jit, static_argnums=range(2, 8))
+def _objective(
+    x_u,
+    time_fractions,
+    running_cost_integrator,
+    running_cost_func,
+    terminal_cost_func,
+    dynamics,
+    x_shape,
+    u_shape,
+):
+    running_cost = running_cost_integrator(
+        x_u, time_fractions, running_cost_func, dynamics, x_shape, u_shape
+    )
+    x, _, t_0, t_f = _unpack(x_u, x_shape, u_shape)
+    terminal_cost = terminal_cost_func(t_0, x[0], t_f, x[-1])
+    return running_cost + terminal_cost
+
+
 class OCP:
     _METHOD_ALIASES = {
         "trapezoidal": (trapezoidal, trapezoidal.TrapezoidalTrajectory, False),
@@ -58,6 +78,7 @@ class OCP:
         initial_guess,
         n_grid,
         method,
+        terminal_cost=None,
         solver_kwargs=None,
         jac_sparsity_estimation_samples=100,
     ):
@@ -72,6 +93,9 @@ class OCP:
         ) = self._METHOD_ALIASES[method]
         self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0, 0)))
         self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
+        self._terminal_cost = jax.jit(
+            (lambda t_0, x_0, t_f, x_f: 0) if terminal_cost is None else terminal_cost
+        )
         self._t_0_lower, self._t_0_upper = t_0
         self._t_f_lower, self._t_f_upper = t_f
         self._x_0_lower, self._x_0_upper = x_0
@@ -123,10 +147,12 @@ class OCP:
         n_grid = self._time_fractions.size
         x_shape, u_shape = self._get_x_u_shapes()
         problem = types.SimpleNamespace()
-        problem.objective = lambda x_u: self._method._objective(
+        problem.objective = lambda x_u: _objective(
             x_u,
             self._time_fractions,
+            self._method._objective,
             self._running_cost,
+            self._terminal_cost,
             self._dynamics,
             x_shape,
             u_shape,

@@ -68,7 +68,6 @@ class OCP:
     def __init__(
         self,
         dynamics,
-        running_cost,
         t_0,
         t_f,
         x_0,
@@ -78,6 +77,7 @@ class OCP:
         initial_guess,
         n_grid,
         method,
+        running_cost=None,
         terminal_cost=None,
         solver_kwargs=None,
         jac_sparsity_estimation_samples=100,
@@ -92,9 +92,10 @@ class OCP:
             self._u_midpoints,
         ) = self._METHOD_ALIASES[method]
         self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0, 0)))
+        running_cost = (lambda *_: 0) if running_cost is None else running_cost
         self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
         self._terminal_cost = jax.jit(
-            (lambda t_0, x_0, t_f, x_f: 0) if terminal_cost is None else terminal_cost
+            (lambda *_: 0) if terminal_cost is None else terminal_cost
         )
         self._t_0_lower, self._t_0_upper = t_0
         self._t_f_lower, self._t_f_upper = t_f

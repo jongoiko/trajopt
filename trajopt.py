@@ -82,7 +82,7 @@ class OCP:
         u_bounds,
         initial_guess,
         n_grid,
-        method,
+        method="trapezoidal",
         running_cost=None,
         terminal_cost=None,
         max_mesh_refinement_iters=None,
@@ -96,11 +96,7 @@ class OCP:
             raise ValueError(
                 f"Choose one collocation method from {list(self._METHOD_ALIASES.keys())}"
             )
-        (
-            self._method,
-            self._trajectory_subclass,
-            self._u_midpoints,
-        ) = self._METHOD_ALIASES[method]
+        self._set_collocation_method(method)
         self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0, 0)))
         running_cost = (lambda *_: 0) if running_cost is None else running_cost
         self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
@@ -122,6 +118,13 @@ class OCP:
         self._solver_kwargs = solver_kwargs
         self._old_discretization_errors = jnp.zeros(n_grid)
         self._jac_sparsity_estimation_samples = jac_sparsity_estimation_samples
+
+    def _set_collocation_method(self, method_name):
+        (
+            self._method,
+            self._trajectory_subclass,
+            self._u_midpoints,
+        ) = self._METHOD_ALIASES[method_name]
 
     def _estimate_jacobian_structure(
         self, n_samples, initial_x_u, constraints, seed=42
@@ -234,12 +237,13 @@ class OCP:
             errors = self._get_discretization_errors(x, u, t, trajectory)
             if errors.max() <= self._error_tolerance:
                 break
-            self._remesh_trajectory(errors)
+            self._remesh_trajectory(errors, i)
             i += 1
         return trajectory
 
-    def _remesh_trajectory(self, errors):
+    def _remesh_trajectory(self, errors, iteration):
         errors = np.array(errors)
+        self._set_new_mesh_order(errors, iteration)
         added_points = np.zeros(self._time_fractions.size - 1).astype(int)
         order_reductions = self._estimate_order_reductions(
             self._old_discretization_errors, errors
@@ -273,6 +277,13 @@ class OCP:
             new_time_fractions.append(jnp.linspace(t_a, t_b, n_points + 2)[:-1])
         new_time_fractions.append(jnp.array([self._time_fractions[-1]]))
         self._time_fractions = jnp.concatenate(new_time_fractions)
+
+    def _set_new_mesh_order(self, errors, iteration):
+        if self._method._ORDER >= 4:
+            return
+        error_is_equidistributed = errors.max() <= 2 * errors.mean()
+        if error_is_equidistributed or iteration >= 2:
+            self._set_collocation_method("hermite-simpson")
 
     def _get_discretization_errors(self, x, u, t, trajectory):
         variable_weights = (

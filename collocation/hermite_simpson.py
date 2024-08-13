@@ -6,6 +6,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+_ORDER = 4
+
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
 def _uncompress_x_u(x_u, time_fractions, dynamics, x_shape, u_shape):

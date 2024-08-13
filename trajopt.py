@@ -85,6 +85,10 @@ class OCP:
         method,
         running_cost=None,
         terminal_cost=None,
+        max_mesh_refinement_iters=None,
+        error_tolerance=None,
+        predicted_error_kappa=0.1,
+        max_new_points_per_interval=5,
         solver_kwargs=None,
         jac_sparsity_estimation_samples=100,
     ):
@@ -111,7 +115,12 @@ class OCP:
         self._u_lower, self._u_upper = u_bounds
         self._time_fractions = jnp.linspace(0, 1, n_grid)
         self._initial_guess = initial_guess
+        self._max_mesh_refinement_iters = max_mesh_refinement_iters
+        self._error_tolerance = error_tolerance
+        self._predicted_error_kappa = predicted_error_kappa
+        self._max_new_points_per_interval = max_new_points_per_interval
         self._solver_kwargs = solver_kwargs
+        self._old_discretization_errors = jnp.zeros(n_grid)
         self._jac_sparsity_estimation_samples = jac_sparsity_estimation_samples
 
     def _estimate_jacobian_structure(
@@ -204,14 +213,66 @@ class OCP:
         return problem
 
     def solve(self):
-        initial_x_u = self._pack_initial_guess()
-        nlp = self._build_nlp(initial_x_u)
-        x_u, _ = nlp.solve(initial_x_u)
-        nlp.close()
-        x_shape, u_shape = self._get_x_u_shapes()
-        x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
-        t = _get_time(t_0, t_f, self._time_fractions)
-        return self._trajectory_subclass(t, x, u, self._dynamics)
+        i = 0
+        while True:
+            if (
+                self._max_mesh_refinement_iters is not None
+                and i >= self._max_mesh_refinement_iters
+            ):
+                break
+            initial_x_u = self._pack_initial_guess()
+            nlp = self._build_nlp(initial_x_u)
+            x_u, _ = nlp.solve(initial_x_u)
+            nlp.close()
+            x_shape, u_shape = self._get_x_u_shapes()
+            x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
+            t = _get_time(t_0, t_f, self._time_fractions)
+            trajectory = self._trajectory_subclass(t, x, u, self._dynamics)
+            self._initial_guess = Guess.from_trajectory(trajectory)
+            if self._error_tolerance is None:
+                break
+            errors = self._get_discretization_errors(x, u, t, trajectory)
+            if errors.max() <= self._error_tolerance:
+                break
+            self._remesh_trajectory(errors)
+            i += 1
+        return trajectory
+
+    def _remesh_trajectory(self, errors):
+        errors = np.array(errors)
+        added_points = np.zeros(self._time_fractions.size - 1).astype(int)
+        order_reductions = self._estimate_order_reductions(
+            self._old_discretization_errors, errors
+        )
+        self._old_discretization_errors = errors
+        while True:
+            max_error_pos = errors.argmax()
+            max_error = errors[max_error_pos]
+            total_added_points = added_points.sum()
+            if total_added_points >= min(
+                self._max_new_points_per_interval,
+                round(self._predicted_error_kappa * self._time_fractions.size),
+            ) and (
+                max_error <= self._error_tolerance
+                and added_points[max_error_pos] == 0
+                or max_error <= self._error_tolerance * self._predicted_error_kappa
+                and added_points[max_error_pos] > 0
+                and added_points[max_error_pos] < self._max_new_points_per_interval
+                or total_added_points >= self._time_fractions.size - 1
+                or added_points.max() >= self._max_new_points_per_interval
+            ):
+                break
+            added_points[max_error_pos] += 1
+            errors[max_error_pos] *= (1 / (1 + added_points[max_error_pos])) ** (
+                self._method._ORDER - order_reductions[max_error_pos] + 1
+            )
+        self._old_added_points = added_points
+        new_time_fractions = []
+        for i, n_points in enumerate(added_points):
+            t_a, t_b = self._time_fractions[jnp.asarray([i, i + 1])]
+            new_time_fractions.append(jnp.linspace(t_a, t_b, n_points + 2)[:-1])
+        new_time_fractions.append(jnp.array([self._time_fractions[-1]]))
+        self._time_fractions = jnp.concatenate(new_time_fractions)
 
     def _get_discretization_errors(self, x, u, t, trajectory):
         variable_weights = (
@@ -240,3 +301,15 @@ class OCP:
                 max_error = max(max_error, integral / (weight + 1))
             errors.append(max_error)
         return jnp.asarray(errors)
+
+    def _estimate_order_reductions(self, old_errors, errors):
+        if jnp.isclose(old_errors.max(), 0):
+            return jnp.zeros(errors.size)
+        new_error_indices = jnp.insert(self._old_added_points + 1, 0, 0).cumsum()[:-1]
+        new_errors = errors[new_error_indices]
+        r_hat = (
+            self._method._ORDER
+            + 1
+            - jnp.log(old_errors / new_errors) / jnp.log(self._old_added_points + 1)
+        )
+        return jnp.maximum(0, jnp.minimum(jnp.round(r_hat), self._method._ORDER))

@@ -55,10 +55,10 @@ def _objective(
     return running_cost + terminal_cost
 
 
-def _collocation_error(t, ocp, solution, variable):
-    t = jnp.array([t])
+def _collocation_error(t_frac, t, ocp, solution):
+    t = t[:-1] + t_frac * (t[1:] - t[:-1])
     x, u = solution.interpolate(t)
-    return jnp.abs((ocp._dynamics(x, u, t) - solution._approx_dynamics(t))[0, variable])
+    return jnp.abs((ocp._dynamics(x, u, t) - solution._approx_dynamics(t)))
 
 
 class OCP:
@@ -300,18 +300,12 @@ class OCP:
             .max(axis=0)
             .reshape(-1)
         )
-        errors = []
-        for t_a, t_b in zip(t[:-1], t[1:]):
-            max_error = 0
-            for variable, weight in enumerate(variable_weights):
-                integral, _ = scipy.integrate.quad(
-                    lambda t: _collocation_error(t, self, trajectory, variable),
-                    t_a,
-                    t_b,
-                )
-                max_error = max(max_error, integral / (weight + 1))
-            errors.append(max_error)
-        return jnp.asarray(errors)
+        errors = scipy.integrate.quad_vec(
+            lambda t_frac: _collocation_error(t_frac, t, self, trajectory),
+            0,
+            1,
+        )[0] * (t[1:] - t[:-1]).reshape(-1, 1)
+        return (errors / (variable_weights + 1)).max(axis=1)
 
     def _estimate_order_reductions(self, old_errors, errors):
         if jnp.isclose(old_errors.max(), 0):

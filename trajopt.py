@@ -6,7 +6,7 @@ import scipy.integrate
 import types
 import logging
 from functools import partial
-from collocation.util import _pack, _unpack, _get_time
+from collocation.util import _pack, _unpack, _get_time, _lerp
 from collocation import trapezoidal, hermite_simpson
 
 
@@ -20,9 +20,7 @@ class Guess:
         self._u = u
 
     def interpolate(self, t, u_midpoints=False):
-        x = np.empty((t.size, self._x.shape[1]))
-        for i in range(x.shape[1]):
-            x[:, i] = np.interp(t, self._t, self._x[:, i])
+        x = _lerp(t, self._t, self._x)
         u_t = (
             t
             if not u_midpoints
@@ -30,9 +28,7 @@ class Guess:
                 np.linspace(0, t.size - 1, 2 * t.size - 1), np.arange(t.size), t
             )
         )
-        u = np.empty((u_t.size, self._u.shape[1]))
-        for i in range(u.shape[1]):
-            u[:, i] = np.interp(u_t, self._t, self._u[:, i])
+        u = _lerp(u_t, self._t, self._u)
         return x, u
 
     @staticmethod

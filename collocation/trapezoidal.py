@@ -1,5 +1,5 @@
 from functools import partial
-from .util import _unpack, _get_time
+from .util import _unpack, _get_time, _lerp
 from .trajectory import Trajectory
 from scipy.interpolate import BPoly
 import jax
@@ -34,9 +34,7 @@ class TrapezoidalTrajectory(Trajectory):
 
     def interpolate(self, t):
         x = np.empty((t.size, self._x.shape[1]))
-        u = np.empty((t.size, self._u.shape[1]))
-        for i in range(u.shape[1]):
-            u[:, i] = np.interp(t, self._t, self._u[:, i])
+        u = _lerp(t, self._t, self._u)
         x_dot = np.asarray(self._x_dot)
         for i in range(x.shape[1]):
             x[:, i] = BPoly.from_derivatives(
@@ -45,7 +43,4 @@ class TrapezoidalTrajectory(Trajectory):
         return x, u
 
     def _approx_dynamics(self, t):
-        x_dot = np.empty((t.size, self._x.shape[1]))
-        for i in range(self._x.shape[1]):
-            x_dot[:, i] = np.interp(t, self._t, self._x_dot[:, i])
-        return x_dot
+        return _lerp(t, self._t, self._x_dot)

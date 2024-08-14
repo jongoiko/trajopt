@@ -25,3 +25,6 @@ def _unpack(x_u, x_shape, u_shape):
 @jax.jit
 def _get_time(t_0, t_f, time_fractions):
     return t_0 + time_fractions * (t_f - t_0)
+
+
+_lerp = jax.jit(jax.vmap(jnp.interp, in_axes=(None, None, 1)))

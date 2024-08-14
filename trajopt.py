@@ -4,9 +4,13 @@ import jax
 import jax.numpy as jnp
 import scipy.integrate
 import types
+import logging
 from functools import partial
 from collocation.util import _pack, _unpack, _get_time
 from collocation import trapezoidal, hermite_simpson
+
+
+logger = logging.getLogger(__name__)
 
 
 class Guess:
@@ -223,6 +227,9 @@ class OCP:
                 and i >= self._max_mesh_refinement_iters
             ):
                 break
+            logging.getLogger(__name__).info(
+                f"Number of grid points is {self._time_fractions.size}."
+            )
             initial_x_u = self._pack_initial_guess()
             nlp = self._build_nlp(initial_x_u)
             x_u, _ = nlp.solve(initial_x_u)
@@ -235,8 +242,12 @@ class OCP:
             if self._error_tolerance is None:
                 break
             errors = self._get_discretization_errors(x, u, t, trajectory)
+            logging.getLogger(__name__).info(
+                f"Maximum discretization error is {errors.max()}."
+            )
             if errors.max() <= self._error_tolerance:
                 break
+            logging.getLogger(__name__).info(f"Remeshing trajectory.")
             self._remesh_trajectory(errors, i)
             i += 1
         return trajectory
@@ -284,6 +295,9 @@ class OCP:
         error_is_equidistributed = errors.max() <= 2 * errors.mean()
         if error_is_equidistributed or iteration >= 2:
             self._set_collocation_method("hermite-simpson")
+            logging.getLogger(__name__).info(
+                f"Switching to Hermite-Simpson collocation."
+            )
 
     def _get_discretization_errors(self, x, u, t, trajectory):
         variable_weights = (

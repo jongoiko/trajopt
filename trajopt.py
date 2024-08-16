@@ -228,7 +228,7 @@ class OCP:
             )
             initial_x_u = self._pack_initial_guess()
             nlp = self._build_nlp(initial_x_u)
-            x_u, _ = nlp.solve(initial_x_u)
+            x_u, info = nlp.solve(initial_x_u)
             nlp.close()
             x_shape, u_shape = self._get_x_u_shapes()
             x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
@@ -246,7 +246,7 @@ class OCP:
             logging.getLogger(__name__).info(f"Remeshing trajectory.")
             self._remesh_trajectory(errors, i)
             i += 1
-        return trajectory
+        return trajectory, info["obj_val"]
 
     def _remesh_trajectory(self, errors, iteration):
         errors = np.array(errors)

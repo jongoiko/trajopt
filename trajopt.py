@@ -74,10 +74,10 @@ class OCP:
     def __init__(
         self,
         dynamics,
-        t_0,
-        t_f,
-        x_0,
-        x_f,
+        t_0_bounds,
+        t_f_bounds,
+        x_0_bounds,
+        x_f_bounds,
         x_bounds,
         u_bounds,
         initial_guess,
@@ -103,10 +103,10 @@ class OCP:
         self._terminal_cost = jax.jit(
             (lambda *_: 0) if terminal_cost is None else terminal_cost
         )
-        self._t_0_lower, self._t_0_upper = t_0
-        self._t_f_lower, self._t_f_upper = t_f
-        self._x_0_lower, self._x_0_upper = x_0
-        self._x_f_lower, self._x_f_upper = x_f
+        self._t_0_lower, self._t_0_upper = t_0_bounds
+        self._t_f_lower, self._t_f_upper = t_f_bounds
+        self._x_0_lower, self._x_0_upper = x_0_bounds
+        self._x_f_lower, self._x_f_upper = x_f_bounds
         self._x_lower, self._x_upper = x_bounds
         self._u_lower, self._u_upper = u_bounds
         self._time_fractions = jnp.linspace(0, 1, n_grid)

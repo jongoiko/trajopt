@@ -55,6 +55,17 @@ def _objective(
     return running_cost + terminal_cost
 
 
+@partial(jax.jit, static_argnums=(2, 3, 4, 5))
+def _collocation_and_path_constraints(
+    x_u, time_fractions, collocation_constraints, path_constraints, x_shape, u_shape
+):
+    x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
+    t = _get_time(t_0, t_f, time_fractions)
+    return jnp.concatenate(
+        [collocation_constraints(x_u), path_constraints(x, u, t).reshape(-1)]
+    )
+
+
 def _collocation_error(t_frac, t, ocp, solution):
     t = t[:-1] + t_frac * (t[1:] - t[:-1])
     x, u = solution.interpolate(t)
@@ -83,6 +94,8 @@ class OCP:
         initial_guess,
         n_grid,
         method="trapezoidal",
+        path_constraints=None,
+        path_constraints_bounds=None,
         running_cost=None,
         terminal_cost=None,
         max_mesh_refinement_iters=None,
@@ -98,6 +111,20 @@ class OCP:
             )
         self._set_collocation_method(method)
         self._dynamics = jax.jit(jax.vmap(dynamics, in_axes=(0, 0, 0)))
+        if path_constraints is not None and path_constraints_bounds is None:
+            raise ValueError(
+                "Provide bounds for the path constraints (path_constraints_bounds)"
+            )
+        self._path_constraints = (
+            jax.jit(jax.vmap(path_constraints, in_axes=(0, 0, 0)))
+            if path_constraints is not None
+            else None
+        )
+        if path_constraints is not None:
+            (
+                self._path_constraints_lower,
+                self._path_constraints_upper,
+            ) = path_constraints_bounds
         running_cost = (lambda *_: 0) if running_cost is None else running_cost
         self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
         self._terminal_cost = jax.jit(
@@ -177,8 +204,21 @@ class OCP:
             u_shape,
         )
         problem.gradient = jax.jit(jax.grad(problem.objective))
-        constraints = lambda x_u: self._method._collocation_constraints(
+        collocation_constraints = lambda x_u: self._method._collocation_constraints(
             x_u, self._time_fractions, self._dynamics, x_shape, u_shape
+        )
+        num_collocation_constraints = collocation_constraints(packed_initial_guess).size
+        constraints = (
+            collocation_constraints
+            if self._path_constraints is None
+            else lambda x_u: _collocation_and_path_constraints(
+                x_u,
+                self._time_fractions,
+                collocation_constraints,
+                self._path_constraints,
+                x_shape,
+                u_shape,
+            )
         )
         problem.constraints = constraints
         jacobian_structure = self._estimate_jacobian_structure(
@@ -188,8 +228,8 @@ class OCP:
         problem.jacobian = jax.jit(
             lambda x_u: jax.jacobian(constraints)(x_u)[jacobian_structure]
         )
-        n = packed_initial_guess.size
-        m = problem.constraints(packed_initial_guess).size
+        num_variables = packed_initial_guess.size
+        num_constraints = constraints(packed_initial_guess).size
         lb_x, ub_x = [
             jnp.tile(arr, (n_grid, 1)) for arr in [self._x_lower, self._x_upper]
         ]
@@ -205,9 +245,30 @@ class OCP:
         lb, ub = _pack(lb_x, lb_u, self._t_0_lower, self._t_f_lower), _pack(
             ub_x, ub_u, self._t_0_upper, self._t_f_upper
         )
-        zeros = jnp.zeros(m)
+        constraint_bounds = (
+            2 * (jnp.zeros(num_collocation_constraints),)
+            if self._path_constraints is None
+            else [
+                jnp.concatenate(
+                    [
+                        jnp.zeros(num_collocation_constraints),
+                        jnp.tile(jnp.asarray(path_constraints_bound), n_grid),
+                    ]
+                )
+                for path_constraints_bound in [
+                    self._path_constraints_lower,
+                    self._path_constraints_upper,
+                ]
+            ]
+        )
         problem = cyipopt.Problem(
-            problem_obj=problem, n=n, m=m, cl=zeros, cu=zeros, lb=lb, ub=ub
+            problem_obj=problem,
+            n=num_variables,
+            m=num_constraints,
+            cl=constraint_bounds[0],
+            cu=constraint_bounds[1],
+            lb=lb,
+            ub=ub,
         )
         if self._solver_kwargs is None:
             return problem

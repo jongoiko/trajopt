@@ -42,6 +42,7 @@ def _objective(x_u, time_fractions, running_cost, dynamics, x_shape, u_shape):
     return ((h / 6).reshape(-1) * (cost[:-1] + 4 * cost_midpoints + cost[1:])).sum()
 
 
+@jax.jit
 def _interp_quadratic_midpoints(values, values_midpoints, t_val, t):
     knot_index = jnp.argmax(t_val < t) - 1
     p = jnp.polyfit(

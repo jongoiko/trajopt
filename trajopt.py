@@ -5,8 +5,10 @@ import jax.numpy as jnp
 import scipy.integrate
 import types
 import logging
+from typing import Callable, Optional, Tuple, Any
 from functools import partial
 from collocation.util import _pack, _unpack, _get_time, _lerp
+from collocation.trajectory import Trajectory
 from collocation import trapezoidal, hermite_simpson
 
 
@@ -14,12 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 class Guess:
-    def __init__(self, t, x, u):
+    def __init__(self, t: jax.Array, x: jax.Array, u: jax.Array):
         self._t = t
         self._x = x
         self._u = u
 
-    def interpolate(self, t, u_midpoints=False):
+    def interpolate(self, t: jax.Array, u_midpoints: bool = False):
         x = _lerp(t, self._t, self._x)
         u_t = (
             t
@@ -32,20 +34,20 @@ class Guess:
         return x, u
 
     @staticmethod
-    def from_trajectory(trajectory):
+    def from_trajectory(trajectory: Trajectory):
         return Guess(trajectory._t, trajectory._x, trajectory._u)
 
 
 @partial(jax.jit, static_argnums=range(2, 8))
 def _objective(
-    x_u,
-    time_fractions,
-    running_cost_integrator,
-    running_cost_func,
-    terminal_cost_func,
-    dynamics,
-    x_shape,
-    u_shape,
+    x_u: jax.Array,
+    time_fractions: jax.Array,
+    running_cost_integrator: Any,
+    running_cost_func: Callable[[jax.Array, jax.Array, jax.Array], float],
+    terminal_cost_func: Callable[[float, jax.Array, float, jax.Array], float],
+    dynamics: Callable[[jax.Array, jax.Array, jax.Array], jax.Array],
+    x_shape: Tuple[int, int],
+    u_shape: Tuple[int, int],
 ):
     running_cost = running_cost_integrator(
         x_u, time_fractions, running_cost_func, dynamics, x_shape, u_shape
@@ -57,7 +59,12 @@ def _objective(
 
 @partial(jax.jit, static_argnums=(2, 3, 4, 5))
 def _collocation_and_path_constraints(
-    x_u, time_fractions, collocation_constraints, path_constraints, x_shape, u_shape
+    x_u: jax.Array,
+    time_fractions: jax.Array,
+    collocation_constraints: Callable[[jax.Array], jax.Array],
+    path_constraints: Callable[[jax.Array, jax.Array, jax.Array], jax.Array],
+    x_shape: Tuple[int, int],
+    u_shape: Tuple[int, int],
 ):
     x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
     t = _get_time(t_0, t_f, time_fractions)
@@ -66,44 +73,40 @@ def _collocation_and_path_constraints(
     )
 
 
-def _collocation_error(t_frac, t, ocp, solution):
-    t = t[:-1] + t_frac * (t[1:] - t[:-1])
-    x, u = solution.interpolate(t)
-    return jnp.abs((ocp._dynamics(x, u, t) - solution._approx_dynamics(t)))
-
-
 class OCP:
     _METHOD_ALIASES = {
-        "trapezoidal": (trapezoidal, trapezoidal.TrapezoidalTrajectory, False),
-        "hermite-simpson": (
-            hermite_simpson,
-            hermite_simpson.HermiteSimpsonTrajectory,
-            True,
-        ),
+        "trapezoidal": trapezoidal.TrapezoidalTrajectory,
+        "hermite-simpson": hermite_simpson.HermiteSimpsonTrajectory,
     }
 
     def __init__(
         self,
-        dynamics,
-        t_0_bounds,
-        t_f_bounds,
-        x_0_bounds,
-        x_f_bounds,
-        x_bounds,
-        u_bounds,
-        initial_guess,
-        n_grid,
-        method="trapezoidal",
-        path_constraints=None,
-        path_constraints_bounds=None,
-        running_cost=None,
-        terminal_cost=None,
-        max_mesh_refinement_iters=None,
-        error_tolerance=None,
-        predicted_error_kappa=0.1,
-        max_new_points_per_interval=5,
-        solver_kwargs=None,
-        jac_sparsity_estimation_samples=100,
+        dynamics: Callable[[jax.Array, jax.Array, jax.Array], jax.Array],
+        t_0_bounds: Tuple[float, float],
+        t_f_bounds: Tuple[float, float],
+        x_0_bounds: Tuple[jax.Array, jax.Array],
+        x_f_bounds: Tuple[jax.Array, jax.Array],
+        x_bounds: Tuple[jax.Array, jax.Array],
+        u_bounds: Tuple[jax.Array, jax.Array],
+        initial_guess: Guess,
+        n_grid: int,
+        method: str = "trapezoidal",
+        path_constraints: Optional[
+            Callable[[jax.Array, jax.Array, jax.Array], jax.Array]
+        ] = None,
+        path_constraints_bounds: Optional[Tuple[jax.Array, jax.Array]] = None,
+        running_cost: Optional[
+            Callable[[jax.Array, jax.Array, jax.Array], float]
+        ] = None,
+        terminal_cost: Optional[
+            Callable[[float, jax.Array, float, jax.Array], float]
+        ] = None,
+        max_mesh_refinement_iters: Optional[int] = None,
+        error_tolerance: Optional[float] = None,
+        predicted_error_kappa: float = 0.1,
+        max_new_points_per_interval: int = 5,
+        solver_kwargs: Optional[dict] = None,
+        jac_sparsity_estimation_samples: int = 100,
     ):
         if method not in self._METHOD_ALIASES:
             raise ValueError(
@@ -120,15 +123,18 @@ class OCP:
             if path_constraints is not None
             else None
         )
-        if path_constraints is not None:
+        if path_constraints is not None and path_constraints_bounds is not None:
             (
                 self._path_constraints_lower,
                 self._path_constraints_upper,
             ) = path_constraints_bounds
         running_cost = (lambda *_: 0) if running_cost is None else running_cost
         self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
+        const_zero_func: Callable[
+            [float, jax.Array, float, jax.Array], float
+        ] = lambda *_: 0.0
         self._terminal_cost = jax.jit(
-            (lambda *_: 0) if terminal_cost is None else terminal_cost
+            const_zero_func if terminal_cost is None else terminal_cost
         )
         self._t_0_lower, self._t_0_upper = t_0_bounds
         self._t_f_lower, self._t_f_upper = t_f_bounds
@@ -143,19 +149,19 @@ class OCP:
         self._predicted_error_kappa = predicted_error_kappa
         self._max_new_points_per_interval = max_new_points_per_interval
         self._solver_kwargs = solver_kwargs
-        self._old_discretization_errors = jnp.zeros(n_grid)
+        self._old_discretization_errors = np.zeros(n_grid)
         self._jac_sparsity_estimation_samples = jac_sparsity_estimation_samples
 
-    def _set_collocation_method(self, method_name):
-        (
-            self._method,
-            self._trajectory_subclass,
-            self._u_midpoints,
-        ) = self._METHOD_ALIASES[method_name]
+    def _set_collocation_method(self, method_name: str):
+        self._trajectory_subclass = self._METHOD_ALIASES[method_name]
 
     def _estimate_jacobian_structure(
-        self, n_samples, initial_x_u, constraints, seed=42
-    ):
+        self,
+        n_samples: int,
+        initial_x_u: jax.Array,
+        constraints: Callable[[jax.Array], jax.Array],
+        seed: int = 42,
+    ) -> Tuple[jax.Array, ...]:
         key = jax.random.key(seed)
         key, *subkeys = jax.random.split(key, n_samples)
         get_jacobian = jax.jit(jax.jacobian(constraints))
@@ -166,7 +172,7 @@ class OCP:
             jac_sum += jnp.abs(jacobian)
         return jnp.nonzero(jac_sum)
 
-    def _pack_initial_guess(self):
+    def _pack_initial_guess(self) -> jax.Array:
         guess_t_0, guess_t_f = (
             self._initial_guess._t.min(),
             self._initial_guess._t.max(),
@@ -174,29 +180,31 @@ class OCP:
         return _pack(
             *self._initial_guess.interpolate(
                 _get_time(guess_t_0, guess_t_f, self._time_fractions),
-                self._u_midpoints,
+                self._trajectory_subclass._USES_U_MIDPOINTS,
             ),
             guess_t_0,
             guess_t_f,
         )
 
-    def _get_x_u_shapes(self):
+    def _get_x_u_shapes(self) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         n_grid = self._time_fractions.size
         x_shape = (n_grid, self._x_0_lower.size)
         u_shape = (
-            n_grid if not self._u_midpoints else 2 * n_grid - 1,
+            n_grid
+            if not self._trajectory_subclass._USES_U_MIDPOINTS
+            else 2 * n_grid - 1,
             self._u_lower.size,
         )
         return x_shape, u_shape
 
-    def _build_nlp(self, packed_initial_guess):
+    def _build_nlp(self, packed_initial_guess: jax.Array) -> cyipopt.Problem:
         n_grid = self._time_fractions.size
         x_shape, u_shape = self._get_x_u_shapes()
         problem = types.SimpleNamespace()
         problem.objective = lambda x_u: _objective(
             x_u,
             self._time_fractions,
-            self._method._objective,
+            self._trajectory_subclass._objective,
             self._running_cost,
             self._terminal_cost,
             self._dynamics,
@@ -204,8 +212,10 @@ class OCP:
             u_shape,
         )
         problem.gradient = jax.jit(jax.grad(problem.objective))
-        collocation_constraints = lambda x_u: self._method._collocation_constraints(
-            x_u, self._time_fractions, self._dynamics, x_shape, u_shape
+        collocation_constraints = (
+            lambda x_u: self._trajectory_subclass._collocation_constraints(
+                x_u, self._time_fractions, self._dynamics, x_shape, u_shape
+            )
         )
         num_collocation_constraints = collocation_constraints(packed_initial_guess).size
         constraints = (
@@ -236,7 +246,12 @@ class OCP:
         lb_u, ub_u = [
             jnp.tile(
                 arr,
-                (n_grid if not self._u_midpoints else 2 * n_grid - 1, 1),
+                (
+                    n_grid
+                    if not self._trajectory_subclass._USES_U_MIDPOINTS
+                    else 2 * n_grid - 1,
+                    1,
+                ),
             )
             for arr in [self._u_lower, self._u_upper]
         ]
@@ -276,7 +291,7 @@ class OCP:
             problem.add_option(key, value)
         return problem
 
-    def solve(self):
+    def solve(self) -> Tuple[Trajectory, float]:
         i = 0
         while True:
             if (
@@ -309,8 +324,9 @@ class OCP:
             i += 1
         return trajectory, info["obj_val"]
 
-    def _remesh_trajectory(self, errors, iteration):
-        errors = np.array(errors)
+    def _remesh_trajectory(self, jnp_errors: jax.Array, iteration: int):
+        assert self._error_tolerance is not None
+        errors = np.array(jnp_errors)
         self._set_new_mesh_order(errors, iteration)
         added_points = np.zeros(self._time_fractions.size - 1).astype(int)
         order_reductions = self._estimate_order_reductions(
@@ -336,7 +352,7 @@ class OCP:
                 break
             added_points[max_error_pos] += 1
             errors[max_error_pos] *= (1 / (1 + added_points[max_error_pos])) ** (
-                self._method._ORDER - order_reductions[max_error_pos] + 1
+                self._trajectory_subclass._ORDER - order_reductions[max_error_pos] + 1
             )
         self._old_added_points = added_points
         new_time_fractions = []
@@ -346,8 +362,8 @@ class OCP:
         new_time_fractions.append(jnp.array([self._time_fractions[-1]]))
         self._time_fractions = jnp.concatenate(new_time_fractions)
 
-    def _set_new_mesh_order(self, errors, iteration):
-        if self._method._ORDER >= 4:
+    def _set_new_mesh_order(self, errors: np.ndarray, iteration: int):
+        if self._trajectory_subclass._ORDER >= 4:
             return
         error_is_equidistributed = errors.max() <= 2 * errors.mean()
         if error_is_equidistributed or iteration >= 2:
@@ -356,13 +372,19 @@ class OCP:
                 f"Switching to Hermite-Simpson collocation."
             )
 
-    def _get_discretization_errors(self, x, u, t, trajectory):
+    def _get_discretization_errors(
+        self, x: jax.Array, u: jax.Array, t: jax.Array, trajectory: Trajectory
+    ) -> jax.Array:
         variable_weights = (
             jnp.abs(
                 jnp.vstack(
                     [
                         self._dynamics(
-                            x, u if not self._u_midpoints else u[::2], t.reshape(-1, 1)
+                            x,
+                            u
+                            if not self._trajectory_subclass._USES_U_MIDPOINTS
+                            else u[::2],
+                            t.reshape(-1, 1),
                         ),
                         x,
                     ]
@@ -378,14 +400,24 @@ class OCP:
         )[0] * (t[1:] - t[:-1]).reshape(-1, 1)
         return (errors / (variable_weights + 1)).max(axis=1)
 
-    def _estimate_order_reductions(self, old_errors, errors):
+    def _estimate_order_reductions(
+        self, old_errors: np.ndarray, errors: np.ndarray
+    ) -> jax.Array:
         if jnp.isclose(old_errors.max(), 0):
             return jnp.zeros(errors.size)
         new_error_indices = jnp.insert(self._old_added_points + 1, 0, 0).cumsum()[:-1]
         new_errors = errors[new_error_indices]
         r_hat = (
-            self._method._ORDER
+            self._trajectory_subclass._ORDER
             + 1
             - jnp.log(old_errors / new_errors) / jnp.log(self._old_added_points + 1)
         )
-        return jnp.maximum(0, jnp.minimum(jnp.round(r_hat), self._method._ORDER))
+        return jnp.maximum(
+            0, jnp.minimum(jnp.round(r_hat), self._trajectory_subclass._ORDER)
+        )
+
+
+def _collocation_error(t_frac: jax.Array, t: jax.Array, ocp: OCP, solution: Trajectory):
+    t = t[:-1] + t_frac * (t[1:] - t[:-1])
+    x, u = solution.interpolate(t)
+    return jnp.abs((ocp._dynamics(x, u, t) - solution._approx_dynamics(t)))

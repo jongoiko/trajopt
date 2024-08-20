@@ -6,8 +6,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-_ORDER = 4
-
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
 def _uncompress_x_u(x_u, time_fractions, dynamics, x_shape, u_shape):
@@ -61,6 +59,9 @@ def _interp_quadratic_midpoints(values, values_midpoints, t_val, t):
 
 
 class HermiteSimpsonTrajectory(Trajectory):
+    _ORDER = 4
+    _USES_U_MIDPOINTS = True
+
     def __init__(self, t, x, u, dynamics):
         super().__init__(t, x, u, dynamics)
         self._interp_quadratic_midpoints = jax.jit(
@@ -103,3 +104,10 @@ class HermiteSimpsonTrajectory(Trajectory):
         return self._interp_quadratic_midpoints(
             self._x_dot, self._x_dot_midpoints, t, self._t
         )
+
+    @staticmethod
+    def _objective(*args):
+        return _objective(*args)
+
+    def _collocation_constraints(*args):
+        return _collocation_constraints(*args)

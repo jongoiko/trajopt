@@ -5,8 +5,6 @@ from scipy.interpolate import BPoly
 import jax
 import numpy as np
 
-_ORDER = 2
-
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
 def _collocation_constraints(x_u, time_fractions, dynamics, x_shape, u_shape):
@@ -28,6 +26,9 @@ def _objective(x_u, time_fractions, running_cost, _, x_shape, u_shape):
 
 
 class TrapezoidalTrajectory(Trajectory):
+    _ORDER = 2
+    _USES_U_MIDPOINTS = False
+
     def __init__(self, t, x, u, dynamics):
         super().__init__(t, x, u, dynamics)
         self._x_dot = dynamics(x, u, t)
@@ -44,3 +45,11 @@ class TrapezoidalTrajectory(Trajectory):
 
     def _approx_dynamics(self, t):
         return _lerp(t, self._t, self._x_dot)
+
+    @staticmethod
+    def _objective(*args):
+        return _objective(*args)
+
+    @staticmethod
+    def _collocation_constraints(*args):
+        return _collocation_constraints(*args)

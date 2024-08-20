@@ -9,3 +9,7 @@ repos:
     rev: 22.10.0
     hooks:
     -   id: black
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: a22ad01
+    hooks:
+    -   id: mypy

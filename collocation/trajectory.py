@@ -44,3 +44,19 @@ class Trajectory(abc.ABC):
         u_shape: Tuple[int, int],
     ) -> jax.Array:
         pass
+
+    @staticmethod
+    @abc.abstractmethod
+    def _get_collocation_points(
+        x_u: jax.Array,
+        time_fractions: jax.Array,
+        dynamics: Callable[[jax.Array, jax.Array, jax.Array], jax.Array],
+        x_shape: Tuple[int, int],
+        u_shape: Tuple[int, int],
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+        pass
+
+    @staticmethod
+    @abc.abstractmethod
+    def _num_collocation_points(t: jax.Array) -> int:
+        pass

@@ -13,15 +13,16 @@ def _uncompress_x_u(x_u, time_fractions, dynamics, x_shape, u_shape):
     u, u_midpoints = u[::2], u[1::2]
     t = _get_time(t_0, t_f, time_fractions).reshape(-1, 1)
     h = t[1:] - t[:-1]
+    t_midpoints = t[:-1] + h / 2
     x_dot = dynamics(x, u, t)
     x_midpoints = 0.5 * (x[:-1] + x[1:]) + (h / 8) * (x_dot[:-1] - x_dot[1:])
-    x_dot_midpoints = dynamics(x_midpoints, u_midpoints, t[:-1] + h / 2)
-    return x, x_midpoints, u, u_midpoints, x_dot, x_dot_midpoints, t, h
+    x_dot_midpoints = dynamics(x_midpoints, u_midpoints, t_midpoints)
+    return x, x_midpoints, u, u_midpoints, x_dot, x_dot_midpoints, t, t_midpoints, h
 
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
 def _collocation_constraints(x_u, time_fractions, dynamics, x_shape, u_shape):
-    x, _, _, _, x_dot, x_dot_midpoints, _, h = _uncompress_x_u(
+    x, _, _, _, x_dot, x_dot_midpoints, _, _, h = _uncompress_x_u(
         x_u, time_fractions, dynamics, x_shape, u_shape
     )
     constraints = (
@@ -32,14 +33,36 @@ def _collocation_constraints(x_u, time_fractions, dynamics, x_shape, u_shape):
 
 @partial(jax.jit, static_argnums=(2, 3, 4, 5))
 def _objective(x_u, time_fractions, running_cost, dynamics, x_shape, u_shape):
-    x, x_midpoints, u, u_midpoints, _, _, t, h = _uncompress_x_u(
+    x, x_midpoints, u, u_midpoints, _, _, t, t_midpoints, h = _uncompress_x_u(
         x_u, time_fractions, dynamics, x_shape, u_shape
     )
 
     cost, cost_midpoints = running_cost(x, u, t), running_cost(
-        x_midpoints, u_midpoints, t[:-1] + h / 2
+        x_midpoints, u_midpoints, t_midpoints
     )
     return ((h / 6).reshape(-1) * (cost[:-1] + 4 * cost_midpoints + cost[1:])).sum()
+
+
+@partial(jax.jit, static_argnums=(2, 3, 4))
+def _get_collocation_points(
+    x_u,
+    time_fractions,
+    dynamics,
+    x_shape,
+    u_shape,
+):
+    x, x_midpoints, u, u_midpoints, _, _, t, t_midpoints, _ = _uncompress_x_u(
+        x_u,
+        time_fractions,
+        dynamics,
+        x_shape,
+        u_shape,
+    )
+    return (
+        jnp.vstack((x, x_midpoints)),
+        jnp.vstack((u, u_midpoints)),
+        jnp.concatenate((t, t_midpoints)),
+    )
 
 
 @jax.jit
@@ -77,6 +100,7 @@ class HermiteSimpsonTrajectory(Trajectory):
             self._x_dot,
             self._x_dot_midpoints,
             _,
+            _,
             self._h,
         ) = _uncompress_x_u(
             _pack(x, u, self.t_0, self.t_f),
@@ -110,5 +134,14 @@ class HermiteSimpsonTrajectory(Trajectory):
     def _objective(*args):
         return _objective(*args)
 
+    @staticmethod
     def _collocation_constraints(*args):
         return _collocation_constraints(*args)
+
+    @staticmethod
+    def _get_collocation_points(*args):
+        return _get_collocation_points(*args)
+
+    @staticmethod
+    def _num_collocation_points(t):
+        return 2 * t.size - 1

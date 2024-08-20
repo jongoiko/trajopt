@@ -21,7 +21,9 @@ class Guess:
         self._x = x
         self._u = u
 
-    def interpolate(self, t: jax.Array, u_midpoints: bool = False):
+    def interpolate(
+        self, t: jax.Array, u_midpoints: bool = False
+    ) -> Tuple[jax.Array, jax.Array]:
         x = _lerp(t, self._t, self._x)
         u_t = (
             t
@@ -55,22 +57,6 @@ def _objective(
     x, _, t_0, t_f = _unpack(x_u, x_shape, u_shape)
     terminal_cost = terminal_cost_func(t_0, x[0], t_f, x[-1])
     return running_cost + terminal_cost
-
-
-@partial(jax.jit, static_argnums=(2, 3, 4, 5))
-def _collocation_and_path_constraints(
-    x_u: jax.Array,
-    time_fractions: jax.Array,
-    collocation_constraints: Callable[[jax.Array], jax.Array],
-    path_constraints: Callable[[jax.Array, jax.Array, jax.Array], jax.Array],
-    x_shape: Tuple[int, int],
-    u_shape: Tuple[int, int],
-):
-    x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
-    t = _get_time(t_0, t_f, time_fractions)
-    return jnp.concatenate(
-        [collocation_constraints(x_u), path_constraints(x, u, t).reshape(-1)]
-    )
 
 
 class OCP:
@@ -218,18 +204,26 @@ class OCP:
             )
         )
         num_collocation_constraints = collocation_constraints(packed_initial_guess).size
-        constraints = (
-            collocation_constraints
-            if self._path_constraints is None
-            else lambda x_u: _collocation_and_path_constraints(
-                x_u,
-                self._time_fractions,
-                collocation_constraints,
-                self._path_constraints,
-                x_shape,
-                u_shape,
+        if self._path_constraints is None:
+            constraints = collocation_constraints
+        else:
+            path_constraints = lambda x_u: self._path_constraints(
+                *self._trajectory_subclass._get_collocation_points(
+                    x_u,
+                    self._time_fractions,
+                    self._dynamics,
+                    x_shape,
+                    u_shape,
+                )
             )
-        )
+            constraints = jax.jit(
+                lambda x_u: jnp.concatenate(
+                    [
+                        collocation_constraints(x_u),
+                        path_constraints(x_u).reshape(-1),
+                    ]
+                )
+            )
         problem.constraints = constraints
         jacobian_structure = self._estimate_jacobian_structure(
             self._jac_sparsity_estimation_samples, packed_initial_guess, constraints
@@ -260,6 +254,9 @@ class OCP:
         lb, ub = _pack(lb_x, lb_u, self._t_0_lower, self._t_f_lower), _pack(
             ub_x, ub_u, self._t_0_upper, self._t_f_upper
         )
+        num_collocation_points = self._trajectory_subclass._num_collocation_points(
+            self._time_fractions
+        )
         constraint_bounds = (
             2 * (jnp.zeros(num_collocation_constraints),)
             if self._path_constraints is None
@@ -267,7 +264,9 @@ class OCP:
                 jnp.concatenate(
                     [
                         jnp.zeros(num_collocation_constraints),
-                        jnp.tile(jnp.asarray(path_constraints_bound), n_grid),
+                        jnp.tile(
+                            jnp.asarray(path_constraints_bound), num_collocation_points
+                        ),
                     ]
                 )
                 for path_constraints_bound in [

@@ -25,6 +25,19 @@ def _objective(x_u, time_fractions, running_cost, _, x_shape, u_shape):
     return ((h / 2).reshape(-1) * (cost[:-1] + cost[1:])).sum()
 
 
+@partial(jax.jit, static_argnums=(2, 3, 4))
+def _get_collocation_points(
+    x_u,
+    time_fractions,
+    dynamics,
+    x_shape,
+    u_shape,
+):
+    x, u, t_0, t_f = _unpack(x_u, x_shape, u_shape)
+    t = _get_time(t_0, t_f, time_fractions).reshape(-1, 1)
+    return x, u, t
+
+
 class TrapezoidalTrajectory(Trajectory):
     _ORDER = 2
     _USES_U_MIDPOINTS = False
@@ -53,3 +66,11 @@ class TrapezoidalTrajectory(Trajectory):
     @staticmethod
     def _collocation_constraints(*args):
         return _collocation_constraints(*args)
+
+    @staticmethod
+    def _get_collocation_points(*args):
+        return _get_collocation_points(*args)
+
+    @staticmethod
+    def _num_collocation_points(t):
+        return t.size

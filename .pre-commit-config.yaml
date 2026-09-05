@@ -1,15 +1,19 @@
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.3.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.15.12
     hooks:
-    -   id: check-yaml
-    -   id: end-of-file-fixer
-    -   id: trailing-whitespace
--   repo: https://github.com/psf/black
-    rev: 22.10.0
+      # Run the linter.
+      - id: ruff
+        args: [--fix]
+      # Run the formatter.
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.20.2
     hooks:
-    -   id: black
--   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: a22ad01
+      - id: mypy
+        args: [--disallow-untyped-calls, --disallow-untyped-defs, --ignore-missing-imports]
+  - repo: https://github.com/asottile/reorder-python-imports
+    rev: v3.16.0
     hooks:
-    -   id: mypy
+      - id: reorder-python-imports

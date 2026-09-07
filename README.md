@@ -32,30 +32,38 @@ Here we implement _trapezoidal_ and _Hermite-Simpson_ collocation.
 
 #### Trapezoidal collocation
 
-Trapezoidal collocation uses only the grid points $x_k, u_k, t_k$, with $\dot{x}_k := f(x_k, u_k, t_k)$. The defect constraints are
+Trapezoidal collocation uses only the grid points $x_k, u_k, t_k$, with $\dot x_k := f(x_k, u_k, t_k)$. The defect constraints are
+
 $$
 x_{k+1} - x_k - \frac{h_k}{2}\Big(\dot{x}_{k+1} + \dot{x}_k\Big) = 0,
 $$
+
 and the integrated running cost is approximated by
+
 $$
 \sum_{k=0}^{N-2} \frac{h_k}{2}\Big(L(x_k,u_k,t_k) + L(x_{k+1},u_{k+1},t_{k+1})\Big).
 $$
 
 #### Hermite–Simpson collocation
 
-Hermite–Simpson adds a midpoint control $u_{k+\frac 1 2}$ as an extra decision variable, and a midpoint state $x_{k+\frac 1 2}$ computed from a cubic Hermite fit, thus given by
+Hermite–Simpson adds a midpoint control $u_{k+1/2}$ as an extra decision variable, and a midpoint state $x_{k+1/2}$ computed from a cubic Hermite fit, thus given by
+
 $$
-x_{k+\frac 1 2} = \frac{1}{2}(x_k + x_{k+1}) + \frac{h_k}{8}\Big(\dot{x}_k - \dot{x}_{k+1}\Big),
+x_{k+1/2} = \frac{1}{2}(x_k + x_{k+1}) + \frac{h_k}{8}\Big(\dot{x}_k - \dot{x}_{k+1}\Big),
 $$
-with $t_{k+\frac 1 2} = t_k + h_k/2$ and $\dot{x}_{k+\frac 1 2} := f(x_{k+\frac 1 2}, u_{k+\frac 1 2}, t_{k+\frac 1 2})$.
+
+with $t_{k+1/2} = t_k + h_k/2$ and $\dot{x}_{k+1/2} := f(x_{k+1/2}, u_{k+1/2}, t_{k+1/2})$.
 
 The defect constraints are
+
 $$
-x_{k+1} - x_k - \frac{h_k}{6}\Big(\dot{x}_{k+1} + 4\dot{x}_{k+\frac 1 2} + \dot{x}_k\Big) = 0,
+x_{k+1} - x_k - \frac{h_k}{6}\Big(\dot{x}_{k+1} + 4\dot{x}_{k+1/2} + \dot{x}_k\Big) = 0,
 $$
+
 and we approximate the running cost by
+
 $$
-\sum_{k=0}^{N-2} \frac{h_k}{6}\Big(L(x_k,u_k,t_k) + 4L(x_{k+\frac 1 2},u_{k+\frac 1 2},t_{k+\frac 1 2}) + L(x_{k+1},u_{k+1},t_{k+1})\Big).
+\sum_{k=0}^{N-2} \frac{h_k}{6}\Big(L(x_k,u_k,t_k) + 4L(x_{k+1/2},u_{k+1/2},t_{k+1/2}) + L(x_{k+1},u_{k+1},t_{k+1})\Big).
 $$
 
 ## Mesh refinement

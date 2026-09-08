@@ -1,6 +1,8 @@
-from typing import Tuple, Callable
-import jax
 import abc
+from typing import Callable
+from typing import Tuple
+
+import jax
 
 
 class Trajectory(abc.ABC):

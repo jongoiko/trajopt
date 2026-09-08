@@ -1,9 +1,13 @@
 from functools import partial
-from .util import _unpack, _get_time, _lerp
-from .trajectory import Trajectory
-from scipy.interpolate import BPoly
+
 import jax
 import numpy as np
+from scipy.interpolate import BPoly
+
+from .trajectory import Trajectory
+from .util import _get_time
+from .util import _lerp
+from .util import _unpack
 
 
 @partial(jax.jit, static_argnums=(2, 3, 4))

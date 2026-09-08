@@ -1,15 +1,24 @@
+import logging
+import types
+from functools import partial
+from typing import Any
+from typing import Callable
+from typing import Optional
+from typing import Tuple
+
 import cyipopt
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
 import scipy.integrate
-import types
-import logging
-from typing import Callable, Optional, Tuple, Any
-from functools import partial
-from collocation.util import _pack, _unpack, _get_time, _lerp
+
+from collocation import hermite_simpson
+from collocation import trapezoidal
 from collocation.trajectory import Trajectory
-from collocation import trapezoidal, hermite_simpson
+from collocation.util import _get_time
+from collocation.util import _lerp
+from collocation.util import _pack
+from collocation.util import _unpack
 
 
 logger = logging.getLogger(__name__)
@@ -116,9 +125,9 @@ class OCP:
             ) = path_constraints_bounds
         running_cost = (lambda *_: 0) if running_cost is None else running_cost
         self._running_cost = jax.vmap(running_cost, in_axes=(0, 0, 0))
-        const_zero_func: Callable[
-            [float, jax.Array, float, jax.Array], float
-        ] = lambda *_: 0.0
+        const_zero_func: Callable[[float, jax.Array, float, jax.Array], float] = (
+            lambda *_: 0.0
+        )
         self._terminal_cost = jax.jit(
             const_zero_func if terminal_cost is None else terminal_cost
         )
@@ -198,8 +207,8 @@ class OCP:
             u_shape,
         )
         problem.gradient = jax.jit(jax.grad(problem.objective))
-        collocation_constraints = (
-            lambda x_u: self._trajectory_subclass._collocation_constraints(
+        collocation_constraints = lambda x_u: (
+            self._trajectory_subclass._collocation_constraints(
                 x_u, self._time_fractions, self._dynamics, x_shape, u_shape
             )
         )
@@ -251,8 +260,9 @@ class OCP:
         ]
         lb_x = lb_x.at[0].set(self._x_0_lower).at[-1].set(self._x_f_lower)
         ub_x = ub_x.at[0].set(self._x_0_upper).at[-1].set(self._x_f_upper)
-        lb, ub = _pack(lb_x, lb_u, self._t_0_lower, self._t_f_lower), _pack(
-            ub_x, ub_u, self._t_0_upper, self._t_f_upper
+        lb, ub = (
+            _pack(lb_x, lb_u, self._t_0_lower, self._t_f_lower),
+            _pack(ub_x, ub_u, self._t_0_upper, self._t_f_upper),
         )
         num_collocation_points = self._trajectory_subclass._num_collocation_points(
             self._time_fractions
@@ -318,7 +328,7 @@ class OCP:
             )
             if errors.max() <= self._error_tolerance:
                 break
-            logging.getLogger(__name__).info(f"Remeshing trajectory.")
+            logging.getLogger(__name__).info("Remeshing trajectory.")
             self._remesh_trajectory(errors, i)
             i += 1
         return trajectory, info["obj_val"]
@@ -368,7 +378,7 @@ class OCP:
         if error_is_equidistributed or iteration >= 2:
             self._set_collocation_method("hermite-simpson")
             logging.getLogger(__name__).info(
-                f"Switching to Hermite-Simpson collocation."
+                "Switching to Hermite-Simpson collocation."
             )
 
     def _get_discretization_errors(

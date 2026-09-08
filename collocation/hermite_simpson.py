@@ -1,10 +1,14 @@
 from functools import partial
-from .util import _unpack, _pack, _get_time
-from .trajectory import Trajectory
-from scipy.interpolate import BPoly
+
 import jax
 import jax.numpy as jnp
 import numpy as np
+from scipy.interpolate import BPoly
+
+from .trajectory import Trajectory
+from .util import _get_time
+from .util import _pack
+from .util import _unpack
 
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
@@ -37,8 +41,9 @@ def _objective(x_u, time_fractions, running_cost, dynamics, x_shape, u_shape):
         x_u, time_fractions, dynamics, x_shape, u_shape
     )
 
-    cost, cost_midpoints = running_cost(x, u, t), running_cost(
-        x_midpoints, u_midpoints, t_midpoints
+    cost, cost_midpoints = (
+        running_cost(x, u, t),
+        running_cost(x_midpoints, u_midpoints, t_midpoints),
     )
     return ((h / 6).reshape(-1) * (cost[:-1] + 4 * cost_midpoints + cost[1:])).sum()
 

@@ -48,7 +48,7 @@ In order to convert the continuous OCP into an NLP, instead of integrating $f$ f
 ### Collocation methods
 
 Here we implement _trapezoidal_ and _Hermite-Simpson_ collocation.
-In what follows we denote $h_k = t_{k+1} - t_k$ the duration of the time interval at the $k$-th segment.
+In what follows we denote by $h_k = t_{k+1} - t_k$ the duration of the time interval at the $k$-th segment.
 
 #### Trapezoidal collocation
 
@@ -72,7 +72,7 @@ $$
 x_{k+1/2} = \frac{1}{2}(x_k + x_{k+1}) + \frac{h_k}{8}\Big(\dot{x}_k - \dot{x}_{k+1}\Big),
 $$
 
-with $t_{k+1/2} = t_k + h_k/2$ and $\dot{x}_{k+1/2} := f(x_{k+1/2}, u_{k+1/2}, t_{k+1/2})$.
+with $t_{k+1/2} = t_k + h_k/2$ and $\dot x_{k+1/2} := f(x_{k+1/2}, u_{k+1/2}, t_{k+1/2})$.
 
 The defect constraints are
 
